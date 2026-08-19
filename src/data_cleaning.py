@@ -84,3 +84,36 @@ def standardize_text_fields(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Impute or handle missing values across business fields.
+
+    Args:
+        df: Input DataFrame
+
+    Returns:
+        DataFrame with imputed missing values
+    """
+    df = df.copy()
+
+    if 'Customer' in df.columns:
+        df['Customer'] = df['Customer'].fillna('Unknown Customer')
+
+    if 'City' in df.columns and 'State' in df.columns:
+        missing_city_mask = df['City'].isna() | (df['City'] == '')
+        if missing_city_mask.any():
+            fallback_city = df['State'].fillna('Unknown') + ' City'
+            df['City'] = np.where(missing_city_mask, fallback_city, df['City'])
+
+    if 'Discount' in df.columns:
+        df['Discount'] = pd.to_numeric(df['Discount'], errors='coerce').fillna(0.0)
+
+    if 'Quantity' in df.columns:
+        df['Quantity'] = pd.to_numeric(df['Quantity'], errors='coerce').fillna(1)
+
+    for col in ['Sales', 'Cost']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+
+    return df
+
