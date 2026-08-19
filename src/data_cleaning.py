@@ -51,3 +51,36 @@ def validate_required_columns(df: pd.DataFrame, required_cols: Optional[List[str
 
     return True
 
+def standardize_text_fields(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardize text casing, strip leading/trailing whitespace, and preserve acronyms.
+
+    Args:
+        df: DataFrame with raw text fields
+
+    Returns:
+        DataFrame with standardized text
+    """
+    df = df.copy()
+
+    acronym_map = {
+        'Upi': 'UPI',
+        'upi': 'UPI',
+        'Cod': 'COD',
+        'cod': 'COD',
+        'Id': 'ID'
+    }
+
+    text_cols = ['Customer', 'Product', 'Category', 'Sub-Category', 'Region', 'State', 'City', 'Payment Mode', 'Shipping Mode']
+    for col in text_cols:
+        if col in df.columns:
+            cleaned_col = df[col].astype(str).str.strip().str.title()
+            cleaned_col = cleaned_col.replace({'Nan': np.nan, 'None': np.nan, '': np.nan})
+
+            for wrong, correct in acronym_map.items():
+                cleaned_col = cleaned_col.replace(to_replace=r'\b' + wrong + r'\b', value=correct, regex=True)
+
+            df[col] = cleaned_col
+
+    return df
+
