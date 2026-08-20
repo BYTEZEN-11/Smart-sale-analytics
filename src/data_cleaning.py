@@ -117,3 +117,46 @@ def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Generate derived business metrics and temporal dimensions.
+
+    Args:
+        df: Preprocessed DataFrame
+
+    Returns:
+        DataFrame with engineered attributes
+    """
+    df = df.copy()
+
+    if 'Order Date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['Order Date']):
+        df['Order Date'] = pd.to_datetime(df['Order Date'], errors='coerce')
+
+    if 'Order Date' in df.columns:
+        df['Year'] = df['Order Date'].dt.year.astype('Int64')
+        df['Month'] = df['Order Date'].dt.month.astype('Int64')
+        df['Quarter'] = df['Order Date'].dt.quarter.astype('Int64')
+        df['Year-Month'] = df['Order Date'].dt.to_period('M').astype(str)
+        df['Day of Week'] = df['Order Date'].dt.day_name()
+        df['Is Weekend'] = df['Order Date'].dt.dayofweek.isin([5, 6]).astype(int)
+
+    if 'Sales' in df.columns and 'Cost' in df.columns:
+        df['Profit'] = np.round(df['Sales'] - df['Cost'], 2)
+
+    if 'Sales' in df.columns and 'Profit' in df.columns:
+        df['Profit Margin'] = np.where(
+            df['Sales'] > 0,
+            np.round((df['Profit'] / df['Sales']) * 100, 2),
+            0.0
+        )
+
+    if 'Sales' in df.columns:
+        df['Order Value'] = df['Sales']
+
+    if 'Sales' in df.columns and 'Quantity' in df.columns:
+        df['Unit Price'] = np.where(df['Quantity'] > 0, np.round(df['Sales'] / df['Quantity'], 2), 0.0)
+    if 'Cost' in df.columns and 'Quantity' in df.columns:
+        df['Unit Cost'] = np.where(df['Quantity'] > 0, np.round(df['Cost'] / df['Quantity'], 2), 0.0)
+
+    return df
+
