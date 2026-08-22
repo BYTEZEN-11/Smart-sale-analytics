@@ -160,3 +160,65 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def normalize_numeric_features(
+    df: pd.DataFrame,
+    columns: List[str],
+    method: str = 'minmax'
+) -> pd.DataFrame:
+    """
+    Normalize numerical columns for machine learning / advanced statistical analysis.
+
+    Args:
+        df: Input DataFrame
+        columns: List of columns to normalize
+        method: 'minmax' for [0, 1] scaling or 'standard' for zero-mean unit-variance
+
+    Returns:
+        DataFrame containing scaled feature columns named as '<col>_scaled'
+    """
+    df_norm = df.copy()
+    for col in columns:
+        if col not in df_norm.columns:
+            continue
+        series = pd.to_numeric(df_norm[col], errors='coerce')
+        if method == 'minmax':
+            min_val = series.min()
+            max_val = series.max()
+            if max_val > min_val:
+                df_norm[f"{col}_scaled"] = (series - min_val) / (max_val - min_val)
+            else:
+                df_norm[f"{col}_scaled"] = 0.0
+        elif method == 'standard':
+            std_val = series.std()
+            if std_val > 0:
+                df_norm[f"{col}_scaled"] = (series - series.mean()) / std_val
+            else:
+                df_norm[f"{col}_scaled"] = 0.0
+    return df_norm
+
+def encode_categorical_features(
+    df: pd.DataFrame,
+    columns: List[str],
+    method: str = 'frequency'
+) -> pd.DataFrame:
+    """
+    Encode categorical columns for analytical modeling.
+
+    Args:
+        df: Input DataFrame
+        columns: Categorical columns to encode
+        method: 'frequency' (percentage of occurrences) or 'onehot' (binary dummy columns)
+
+    Returns:
+        DataFrame with encoded features
+    """
+    df_encoded = df.copy()
+    if method == 'frequency':
+        for col in columns:
+            if col in df_encoded.columns:
+                freq = df_encoded[col].value_counts(normalize=True)
+                df_encoded[f"{col}_freq"] = df_encoded[col].map(freq).fillna(0.0)
+    elif method == 'onehot':
+        df_encoded = pd.get_dummies(df_encoded, columns=columns, drop_first=True, dtype=int)
+    return df_encoded
+
