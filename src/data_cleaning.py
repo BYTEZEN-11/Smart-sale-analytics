@@ -267,3 +267,123 @@ def encode_categorical_features(
         df_encoded = pd.get_dummies(df_encoded, columns=columns, drop_first=True, dtype=int)
     return df_encoded
 
+def clean_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Execute full production data cleaning pipeline:
+    1. Validation of required columns.
+    2. Deduplication of records.
+    3. Standardization of categorical & text fields with acronym protection.
+    4. Date conversion & dropping corrupted dates.
+    5. Missing value imputation with vectorized rules.
+    6. Numerical boundary clipping & capping.
+    7. Business rule integrity checks (Profit recalculation).
+    8. Derived feature engineering (temporal, unit economics, profit margins).
+
+    Args:
+        df: Raw input DataFrame
+
+    Returns:
+        Cleaned, validated, and enriched DataFrame
+
+    Raises:
+        DataCleaningError: If validation fails or input is empty
+    """
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        logger.error("Empty or invalid DataFrame provided for cleaning")
+        raise DataCleaningError("Cannot clean empty or invalid DataFrame")
+
+    initial_rows = len(df)
+    logger.info(f"Initiating data cleaning pipeline. Initial row count: {initial_rows}")
+
+    try:
+        clean_df = df.copy()
+
+        validate_required_columns(clean_df, REQUIRED_COLUMNS)
+
+        initial_count = len(clean_df)
+        clean_df = clean_df.drop_duplicates(subset=['Order ID'], keep='first')
+        dupes_removed = initial_count - len(clean_df)
+        if dupes_removed > 0:
+            logger.info(f"Deduplication removed {dupes_removed} duplicate Order ID rows")
+
+        clean_df = standardize_text_fields(clean_df)
+
+        clean_df['Order Date'] = pd.to_datetime(clean_df['Order Date'], errors='coerce')
+        invalid_dates_count = clean_df['Order Date'].isna().sum()
+        if invalid_dates_count > 0:
+            logger.warning(f"Removing {invalid_dates_count} records with unparseable Order Dates")
+            clean_df = clean_df.dropna(subset=['Order Date'])
+
+        clean_df = handle_missing_values(clean_df)
+
+        clean_df['Quantity'] = pd.to_numeric(clean_df['Quantity'], errors='coerce').clip(lower=1, upper=10)
+        clean_df['Discount'] = pd.to_numeric(clean_df['Discount'], errors='coerce').clip(lower=0.0, upper=0.55)
+        clean_df['Sales'] = pd.to_numeric(clean_df['Sales'], errors='coerce')
+        clean_df['Cost'] = pd.to_numeric(clean_df['Cost'], errors='coerce')
+
+        invalid_sales_mask = clean_df['Sales'] <= 0
+        if invalid_sales_mask.any():
+            invalid_sales_count = invalid_sales_mask.sum()
+            logger.info(f"Removing {invalid_sales_count} rows with non-positive sales")
+            clean_df = clean_df[~invalid_sales_mask]
+
+        sales_cap = clean_df['Sales'].quantile(SALES_PERCENTILE_CAP / 100.0)
+        extreme_sales_count = (clean_df['Sales'] > sales_cap).sum()
+        if extreme_sales_count > 0:
+            logger.info(f"Capping {extreme_sales_count} extreme sales values at {SALES_PERCENTILE_CAP}th percentile (${sales_cap:,.2f})")
+            clean_df['Sales'] = clean_df['Sales'].clip(upper=sales_cap)
+
+        clean_df = engineer_features(clean_df)
+
+        final_rows = len(clean_df)
+        logger.info(f"Data cleaning pipeline successfully completed: {initial_rows} -> {final_rows} rows (Total dropped: {initial_rows - final_rows})")
+
+        return clean_df
+
+    except DataCleaningError:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in cleaning pipeline: {e}", exc_info=True)
+        raise DataCleaningError(f"Data cleaning pipeline failed: {e}")
+
+def get_data_quality_report(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Generate an exhaustive data quality audit report.
+
+    Args:
+        df: Input DataFrame to audit
+
+    Returns:
+        Structured audit dictionary with metrics for completeness, uniqueness,
+        validity, memory footprint, and column distributions.
+    """
+    if df is None or df.empty:
+        return {}
+
+    total_cells = df.size
+    total_missing = df.isnull().sum().sum()
+    completeness = round(((total_cells - total_missing) / total_cells) * 100, 2) if total_cells > 0 else 0.0
+
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+
+    outlier_counts = {}
+    for col in numeric_cols:
+        outlier_counts[col] = int(detect_outliers_iqr(df[col]).sum())
+
+    report = {
+        'total_rows': len(df),
+        'total_columns': len(df.columns),
+        'completeness_score': completeness,
+        'missing_values': df.isnull().sum().to_dict(),
+        'missing_percentages': (df.isnull().mean() * 100).round(2).to_dict(),
+        'duplicate_rows': int(df.duplicated().sum()),
+        'duplicate_order_ids': int(df['Order ID'].duplicated().sum()) if 'Order ID' in df.columns else 0,
+        'memory_usage_mb': round(df.memory_usage(deep=True).sum() / (1024 ** 2), 2),
+        'dtypes': df.dtypes.astype(str).to_dict(),
+        'outlier_counts_iqr': outlier_counts,
+        'numeric_stats': df[numeric_cols].describe().round(2).to_dict() if numeric_cols else {},
+        'cardinality': {col: int(df[col].nunique()) for col in df.columns}
+    }
+
+    return report
