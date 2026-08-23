@@ -84,6 +84,51 @@ def standardize_text_fields(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def detect_outliers_iqr(series: pd.Series, factor: float = 1.5) -> pd.Series:
+    """
+    Detect outliers using Tukey's Interquartile Range (IQR) method.
+
+    Args:
+        series: Numeric pandas Series
+        factor: IQR multiplier (default 1.5 for mild outliers, 3.0 for extreme)
+
+    Returns:
+        Boolean Series indicating whether each index is an outlier
+    """
+    clean_series = pd.to_numeric(series, errors='coerce').dropna()
+    if len(clean_series) < 4:
+        return pd.Series(False, index=series.index)
+
+    q25 = clean_series.quantile(0.25)
+    q75 = clean_series.quantile(0.75)
+    iqr = q75 - q25
+
+    lower_bound = q25 - (factor * iqr)
+    upper_bound = q75 + (factor * iqr)
+
+    return (series < lower_bound) | (series > upper_bound)
+
+def detect_outliers_zscore(series: pd.Series, threshold: float = OUTLIER_Z_THRESHOLD) -> pd.Series:
+    """
+    Detect outliers using standard Z-score method.
+
+    Args:
+        series: Numeric pandas Series
+        threshold: Standard deviation threshold (default 3.0)
+
+    Returns:
+        Boolean Series where True indicates outlier
+    """
+    clean_series = pd.to_numeric(series, errors='coerce').dropna()
+    std = clean_series.std()
+    if std == 0 or len(clean_series) < 2:
+        return pd.Series(False, index=series.index)
+
+    mean = clean_series.mean()
+    z_scores = np.abs((clean_series - mean) / std)
+    outliers = z_scores > threshold
+    return outliers.reindex(series.index, fill_value=False)
+
 def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     """
     Impute or handle missing values across business fields.
