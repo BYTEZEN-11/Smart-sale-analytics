@@ -39,3 +39,52 @@ def generate_dataset_overview(df: pd.DataFrame) -> Dict[str, Any]:
         'duplicate_rows': int(df.duplicated().sum())
     }
 
+def compute_statistical_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute rigorous descriptive statistics for all numeric columns:
+    Mean, Median, Mode, Variance, Std Dev, Min, Max, Skewness, Kurtosis, and IQR.
+
+    Args:
+        df: Input DataFrame
+
+    Returns:
+        DataFrame with detailed statistical metrics indexed by feature name
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    numeric_df = df.select_dtypes(include=[np.number])
+    if numeric_df.empty:
+        return pd.DataFrame()
+
+    records = []
+    for col in numeric_df.columns:
+        s = numeric_df[col].dropna()
+        if len(s) == 0:
+            continue
+
+        mode_val = s.mode().iloc[0] if not s.mode().empty else np.nan
+        q25 = s.quantile(0.25)
+        q75 = s.quantile(0.75)
+        iqr = q75 - q25
+
+        records.append({
+            'Feature': col,
+            'Count': int(len(s)),
+            'Mean': round(float(s.mean()), 2),
+            'Median': round(float(s.median()), 2),
+            'Mode': round(float(mode_val), 2) if pd.notnull(mode_val) else np.nan,
+            'Std Dev': round(float(s.std()), 2),
+            'Variance': round(float(s.var()), 2),
+            'Min': round(float(s.min()), 2),
+            '25%': round(float(q25), 2),
+            '50% (Median)': round(float(s.median()), 2),
+            '75%': round(float(q75), 2),
+            'Max': round(float(s.max()), 2),
+            'IQR': round(float(iqr), 2),
+            'Skewness': round(float(s.skew()), 3),
+            'Kurtosis': round(float(s.kurtosis()), 3)
+        })
+
+    return pd.DataFrame(records).set_index('Feature')
+
