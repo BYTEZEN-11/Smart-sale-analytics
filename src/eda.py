@@ -88,3 +88,25 @@ def compute_statistical_summary(df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(records).set_index('Feature')
 
+def compute_correlation_matrices(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    """
+    Compute Pearson (linear) and Spearman (rank-order) correlation matrices for numeric features.
+
+    Args:
+        df: Input DataFrame
+
+    Returns:
+        Dictionary with 'pearson' and 'spearman' DataFrames
+    """
+    if df is None or df.empty:
+        return {'pearson': pd.DataFrame(), 'spearman': pd.DataFrame()}
+
+    num_df = df.select_dtypes(include=[np.number])
+    if num_df.shape[1] < 2:
+        return {'pearson': pd.DataFrame(), 'spearman': pd.DataFrame()}
+
+    return {
+        'pearson': num_df.corr(method='pearson').round(3),
+        'spearman': num_df.corr(method='spearman').round(3)
+    }
+
