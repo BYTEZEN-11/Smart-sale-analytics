@@ -212,3 +212,124 @@ def perform_eda(df: pd.DataFrame) -> Dict[str, Any]:
 
     return insights
 
+def plot_eda_correlation_heatmap(df: pd.DataFrame) -> go.Figure:
+    """
+    Generate an interactive Plotly correlation heatmap.
+
+    Args:
+        df: Input DataFrame
+
+    Returns:
+        Plotly Figure object
+    """
+    corr_df = df.select_dtypes(include=[np.number]).corr().round(2)
+    if corr_df.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No numeric data for correlation", showarrow=False)
+        return fig
+
+    fig = px.imshow(
+        corr_df,
+        text_auto=True,
+        aspect="auto",
+        color_continuous_scale="RdBu_r",
+        zmin=-1,
+        zmax=1,
+        title="🔥 Feature Correlation Matrix (Pearson)"
+    )
+    fig.update_layout(
+        template="plotly_white",
+        font=dict(family="Arial", size=12)
+    )
+    return fig
+
+def plot_univariate_distribution(df: pd.DataFrame, column: str) -> go.Figure:
+    """
+    Generate interactive histogram with box plot overlay for univariate feature inspection.
+
+    Args:
+        df: Input DataFrame
+        column: Column name to visualize
+
+    Returns:
+        Plotly Figure object
+    """
+    if column not in df.columns:
+        fig = go.Figure()
+        fig.add_annotation(text=f"Column '{column}' not found", showarrow=False)
+        return fig
+
+    fig = px.histogram(
+        df,
+        x=column,
+        marginal="box",
+        nbins=40,
+        color_discrete_sequence=['#4facfe'],
+        title=f"📊 Distribution & Boxplot: {column}"
+    )
+    fig.update_layout(
+        template="plotly_white",
+        bargap=0.05,
+        xaxis_title=column,
+        yaxis_title="Frequency"
+    )
+    return fig
+
+def visualize_sales_trends(df: pd.DataFrame, output_path: Optional[str] = None) -> matplotlib.figure.Figure:
+    """
+    Generate a 4-panel publication-grade static visualization using Matplotlib/Seaborn.
+
+    Args:
+        df: Cleaned sales DataFrame
+        output_path: Optional file path to persist figure as PNG/PDF
+
+    Returns:
+        Matplotlib Figure object
+    """
+    sns.set_theme(style="whitegrid")
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+
+    if 'Year-Month' in df.columns and 'Sales' in df.columns:
+        monthly = df.groupby('Year-Month')['Sales'].sum()
+        axes[0, 0].plot(monthly.index, monthly.values, marker='o', color='#3b82f6', linewidth=2.5, markersize=5)
+        axes[0, 0].set_title('Monthly Revenue Trend', fontsize=14, fontweight='bold', pad=10)
+        axes[0, 0].set_xlabel('Month', fontsize=11)
+        axes[0, 0].set_ylabel('Total Revenue ($)', fontsize=11)
+        axes[0, 0].tick_params(axis='x', rotation=45)
+        axes[0, 0].yaxis.set_major_formatter('${x:,.0f}')
+
+    if 'Category' in df.columns and 'Sales' in df.columns:
+        category_sales = df.groupby('Category')['Sales'].sum().sort_values()
+        axes[0, 1].barh(category_sales.index, category_sales.values, color='#8b5cf6', edgecolor='white')
+        axes[0, 1].set_title('Revenue by Category', fontsize=14, fontweight='bold', pad=10)
+        axes[0, 1].set_xlabel('Revenue ($)', fontsize=11)
+        axes[0, 1].xaxis.set_major_formatter('${x:,.0f}')
+
+    if 'Region' in df.columns and 'Sales' in df.columns and 'Profit' in df.columns:
+        region_df = df.groupby('Region')[['Sales', 'Profit']].sum()
+        x = np.arange(len(region_df))
+        width = 0.35
+        axes[1, 0].bar(x - width/2, region_df['Sales'], width, label='Sales', color='#0ea5e9')
+        axes[1, 0].bar(x + width/2, region_df['Profit'], width, label='Profit', color='#10b981')
+        axes[1, 0].set_title('Sales vs. Profit by Region', fontsize=14, fontweight='bold', pad=10)
+        axes[1, 0].set_xticks(x)
+        axes[1, 0].set_xticklabels(region_df.index, fontsize=11)
+        axes[1, 0].yaxis.set_major_formatter('${x:,.0f}')
+        axes[1, 0].legend()
+
+    if 'Profit Margin' in df.columns:
+        margins = df['Profit Margin'].dropna().clip(-50, 100)
+        sns.histplot(margins, bins=40, kde=True, ax=axes[1, 1], color='#f59e0b', edgecolor='black')
+        axes[1, 1].axvline(margins.median(), color='red', linestyle='--', label=f'Median: {margins.median():.1f}%')
+        axes[1, 1].set_title('Profit Margin Distribution', fontsize=14, fontweight='bold', pad=10)
+        axes[1, 1].set_xlabel('Profit Margin (%)', fontsize=11)
+        axes[1, 1].set_ylabel('Frequency', fontsize=11)
+        axes[1, 1].legend()
+
+    plt.tight_layout()
+
+    if output_path:
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        logger.info(f"Saved EDA visualization to {output_path}")
+
+    return fig
