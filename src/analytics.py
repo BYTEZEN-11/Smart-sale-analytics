@@ -60,3 +60,30 @@ def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
         'units_sold': units_sold
     }
 
+def get_top_performers(
+    df: pd.DataFrame,
+    group_by: str,
+    metric: str = 'Sales',
+    top_n: int = 10
+) -> pd.DataFrame:
+    """
+    Get top N entities aggregated by metric.
+
+    Args:
+        df: Input DataFrame
+        group_by: Dimension column
+        metric: Continuous metric
+        top_n: Number of records
+
+    Returns:
+        DataFrame containing ranked top performers
+    """
+    if df is None or df.empty or group_by not in df.columns or metric not in df.columns:
+        return pd.DataFrame()
+
+    try:
+        grouped = df.groupby(group_by, as_index=False)[metric].sum()
+        return grouped.nlargest(top_n, metric).reset_index(drop=True)
+    except Exception as e:
+        logger.error(f"Top performers aggregation error: {e}")
+        return pd.DataFrame()
