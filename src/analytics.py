@@ -23,6 +23,112 @@ class AnalyticsError(Exception):
     """Custom exception raised when an analytical operation fails."""
     pass
 
+def _segment_customer(row: pd.Series) -> str:
+    """
+    Classify a customer into strategic behavioral cohorts based on R, F, M quintiles.
+
+    Args:
+        row: Pandas series containing R_Score, F_Score, M_Score (values 1 to 5)
+
+    Returns:
+        Segment label string
+    """
+    r, f, m = int(row['R_Score']), int(row['F_Score']), int(row['M_Score'])
+
+    if r >= 4 and f >= 4 and m >= 4:
+        return 'Champions'
+    elif r >= 3 and f >= 3:
+        return 'Loyal Customers'
+    elif r >= 3 and f <= 2:
+        return 'Potential Loyalists'
+    elif r <= 2 and f >= 3:
+        return 'At Risk'
+    else:
+        return 'Lost Customers'
+
+def rfm_segmentation(
+    df: pd.DataFrame,
+    quantiles: int = RFM_QUANTILES
+) -> pd.DataFrame:
+    """
+    Perform Recency, Frequency, Monetary (RFM) segmentation and estimate Customer Lifetime Value (CLV).
+
+    Args:
+        df: Sales transactions DataFrame
+        quantiles: Number of quintile score bins (default 5)
+
+    Returns:
+        DataFrame with Customer metrics, R/F/M scores, RFM_Score, Customer Segment, and CLV Proxy
+    """
+    if df is None or df.empty:
+        logger.warning("Empty DataFrame provided for RFM segmentation")
+        return pd.DataFrame(columns=[
+            'Customer', 'Recency', 'Frequency', 'Monetary',
+            'R_Score', 'F_Score', 'M_Score', 'RFM_Score',
+            'Customer Segment', 'AOV', 'Estimated_CLV'
+        ])
+
+    try:
+        logger.info(f"Computing RFM segmentation for {df['Customer'].nunique():,} unique customers")
+
+        if not pd.api.types.is_datetime64_any_dtype(df['Order Date']):
+            df = df.copy()
+            df['Order Date'] = pd.to_datetime(df['Order Date'], errors='coerce')
+
+        reference_date = df['Order Date'].max() + pd.Timedelta(days=1)
+
+        rfm = df.groupby('Customer').agg(
+            Recency=('Order Date', lambda x: int((reference_date - x.max()).days)),
+            Frequency=('Order ID', 'nunique'),
+            Monetary=('Sales', 'sum'),
+            TotalProfit=('Profit', 'sum') if 'Profit' in df.columns else ('Sales', lambda x: x.sum() * 0.2)
+        ).reset_index()
+
+        rfm['Recency'] = rfm['Recency'].astype(int)
+        rfm['Frequency'] = rfm['Frequency'].astype(int)
+        rfm['Monetary'] = rfm['Monetary'].round(2)
+
+        n_customers = len(rfm)
+        if n_customers < quantiles:
+            logger.warning(f"Customer base ({n_customers}) smaller than quantiles ({quantiles}). Using fallback score 3.")
+            rfm['R_Score'] = 3
+            rfm['F_Score'] = 3
+            rfm['M_Score'] = 3
+        else:
+            try:
+                rfm['R_Score'] = pd.qcut(rfm['Recency'], q=quantiles, labels=list(range(quantiles, 0, -1)), duplicates='drop')
+            except ValueError:
+                rfm['R_Score'] = pd.cut(rfm['Recency'], bins=quantiles, labels=list(range(quantiles, 0, -1)), include_lowest=True)
+
+            try:
+                rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), q=quantiles, labels=list(range(1, quantiles + 1)), duplicates='drop')
+            except ValueError:
+                rfm['F_Score'] = pd.cut(rfm['Frequency'], bins=quantiles, labels=list(range(1, quantiles + 1)), include_lowest=True)
+
+            try:
+                rfm['M_Score'] = pd.qcut(rfm['Monetary'].rank(method='first'), q=quantiles, labels=list(range(1, quantiles + 1)), duplicates='drop')
+            except ValueError:
+                rfm['M_Score'] = pd.cut(rfm['Monetary'], bins=quantiles, labels=list(range(1, quantiles + 1)), include_lowest=True)
+
+        rfm['R_Score'] = rfm['R_Score'].astype(int)
+        rfm['F_Score'] = rfm['F_Score'].astype(int)
+        rfm['M_Score'] = rfm['M_Score'].astype(int)
+
+        rfm['RFM_Score'] = rfm['R_Score'] * 100 + rfm['F_Score'] * 10 + rfm['M_Score']
+        rfm['Customer Segment'] = rfm.apply(_segment_customer, axis=1)
+
+        rfm['AOV'] = np.where(rfm['Frequency'] > 0, (rfm['Monetary'] / rfm['Frequency']).round(2), 0.0)
+
+        margin_factor = np.where(rfm['Monetary'] > 0, np.clip(rfm['TotalProfit'] / rfm['Monetary'], 0.05, 0.50), 0.20)
+        rfm['Estimated_CLV'] = (rfm['Monetary'] * (1 + (rfm['Frequency'] * 0.10)) * margin_factor).round(2)
+        rfm = rfm.drop(columns=['TotalProfit'])
+
+        return rfm
+
+    except Exception as e:
+        logger.error(f"RFM segmentation encountered failure: {e}", exc_info=True)
+        raise AnalyticsError(f"RFM calculation failed: {e}")
+
 def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Calculate high-level executive business KPIs.
