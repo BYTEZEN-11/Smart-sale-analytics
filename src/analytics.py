@@ -129,6 +129,98 @@ def rfm_segmentation(
         logger.error(f"RFM segmentation encountered failure: {e}", exc_info=True)
         raise AnalyticsError(f"RFM calculation failed: {e}")
 
+def forecast_sales(
+    df: pd.DataFrame,
+    periods: int = FORECAST_PERIODS,
+    confidence_level: float = CONFIDENCE_LEVEL
+) -> pd.DataFrame:
+    """
+    Generate future monthly sales forecast with trend-seasonality modeling
+    and statistical confidence intervals (Lower/Upper 95% CI).
+
+    Args:
+        df: Sales DataFrame
+        periods: Months to forecast forward (default 6)
+        confidence_level: Confidence interval band (default 0.95)
+
+    Returns:
+        DataFrame containing Historical and Forecast rows with Point Estimates, Lower CI, Upper CI
+    """
+    if df is None or df.empty:
+        logger.warning("Empty DataFrame provided for forecasting")
+        return pd.DataFrame(columns=['Year-Month', 'Sales', 'Lower_CI', 'Upper_CI', 'Type'])
+
+    try:
+        if 'Year-Month' not in df.columns:
+            if 'Order Date' in df.columns:
+                df = df.copy()
+                df['Year-Month'] = pd.to_datetime(df['Order Date']).dt.to_period('M').astype(str)
+            else:
+                raise AnalyticsError("Missing 'Order Date' or 'Year-Month' column")
+
+        monthly = df.groupby('Year-Month', as_index=False)['Sales'].sum().sort_values('Year-Month').reset_index(drop=True)
+
+        if len(monthly) < 2:
+            monthly['Lower_CI'] = monthly['Sales']
+            monthly['Upper_CI'] = monthly['Sales']
+            monthly['Type'] = 'Historical'
+            return monthly
+
+        n_hist = len(monthly)
+        t = np.arange(n_hist)
+        y = monthly['Sales'].values
+
+        t_mean = t.mean()
+        y_mean = y.mean()
+        denom = ((t - t_mean) ** 2).sum()
+        slope = ((t - t_mean) * (y - y_mean)).sum() / denom if denom != 0 else 0.0
+        intercept = y_mean - slope * t_mean
+
+        fitted = slope * t + intercept
+        residuals = y - fitted
+        std_error = residuals.std(ddof=2) if len(residuals) > 2 else residuals.std()
+        if np.isnan(std_error) or std_error == 0:
+            std_error = y_mean * 0.05
+
+        dof = max(n_hist - 2, 1)
+        t_crit = stats.t.ppf((1 + confidence_level) / 2.0, df=dof)
+
+        monthly['Lower_CI'] = monthly['Sales']
+        monthly['Upper_CI'] = monthly['Sales']
+        monthly['Type'] = 'Historical'
+
+        last_period = pd.Period(monthly['Year-Month'].iloc[-1], freq='M')
+        future_periods = [str(last_period + i) for i in range(1, periods + 1)]
+        t_future = np.arange(n_hist, n_hist + periods)
+
+        seasonal_indices = np.ones(periods)
+        if n_hist >= 12:
+            monthly['MonthNum'] = [pd.Period(ym, freq='M').month for ym in monthly['Year-Month']]
+            month_factors = monthly.groupby('MonthNum')['Sales'].mean() / y_mean
+            seasonal_indices = np.array([month_factors.get(pd.Period(fp, freq='M').month, 1.0) for fp in future_periods])
+
+        forecast_point = (slope * t_future + intercept) * seasonal_indices
+        forecast_point = np.maximum(forecast_point, 0.0).round(2)
+
+        margin_of_error = t_crit * std_error * np.sqrt(1 + 1/n_hist + ((t_future - t_mean)**2)/denom)
+        lower_ci = np.maximum(forecast_point - margin_of_error, 0.0).round(2)
+        upper_ci = (forecast_point + margin_of_error).round(2)
+
+        forecast_df = pd.DataFrame({
+            'Year-Month': future_periods,
+            'Sales': forecast_point,
+            'Lower_CI': lower_ci,
+            'Upper_CI': upper_ci,
+            'Type': 'Forecast'
+        })
+
+        result = pd.concat([monthly[['Year-Month', 'Sales', 'Lower_CI', 'Upper_CI', 'Type']], forecast_df], ignore_index=True)
+        return result
+
+    except Exception as e:
+        logger.error(f"Forecasting calculation error: {e}", exc_info=True)
+        raise AnalyticsError(f"Forecasting engine failed: {e}")
+
 def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Calculate high-level executive business KPIs.
