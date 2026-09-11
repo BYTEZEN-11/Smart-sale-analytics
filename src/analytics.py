@@ -221,6 +221,62 @@ def forecast_sales(
         logger.error(f"Forecasting calculation error: {e}", exc_info=True)
         raise AnalyticsError(f"Forecasting engine failed: {e}")
 
+def perform_two_sample_ttest(
+    df: pd.DataFrame,
+    group_col: str,
+    val_col: str,
+    group_a: str,
+    group_b: str
+) -> Dict[str, Any]:
+    """
+    Perform independent two-sample Welch's t-test comparing metric across two groups.
+
+    Args:
+        df: Input DataFrame
+        group_col: Column containing group categories
+        val_col: Continuous variable to compare (e.g. 'Sales', 'Profit')
+        group_a: Name of first category
+        group_b: Name of second category
+
+    Returns:
+        Dictionary with t-statistic, p-value, group sample sizes, means, and hypothesis decision
+    """
+    if df is None or df.empty:
+        return {'status': 'insufficient_data'}
+
+    vals_a = df[df[group_col] == group_a][val_col].dropna()
+    vals_b = df[df[group_col] == group_b][val_col].dropna()
+
+    if len(vals_a) < 2 or len(vals_b) < 2:
+        return {
+            'status': 'insufficient_samples',
+            'group_a_size': len(vals_a),
+            'group_b_size': len(vals_b)
+        }
+
+    res = stats.ttest_ind(vals_a, vals_b, equal_var=False)
+    p_val = float(res.pvalue)
+
+    return {
+        'status': 'success',
+        'group_a': group_a,
+        'group_b': group_b,
+        'mean_a': round(float(vals_a.mean()), 2),
+        'mean_b': round(float(vals_b.mean()), 2),
+        'std_a': round(float(vals_a.std()), 2),
+        'std_b': round(float(vals_b.std()), 2),
+        'n_a': int(len(vals_a)),
+        'n_b': int(len(vals_b)),
+        't_statistic': round(float(res.statistic), 4),
+        'p_value': round(p_val, 6),
+        'is_significant': bool(p_val < 0.05),
+        'conclusion': (
+            f"Statistically significant difference detected (p = {p_val:.4f} < 0.05)"
+            if p_val < 0.05
+            else f"No statistically significant difference found (p = {p_val:.4f} >= 0.05)"
+        )
+    }
+
 def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Calculate high-level executive business KPIs.
