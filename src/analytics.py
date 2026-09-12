@@ -277,6 +277,49 @@ def perform_two_sample_ttest(
         )
     }
 
+def perform_one_way_anova(
+    df: pd.DataFrame,
+    group_col: str,
+    val_col: str
+) -> Dict[str, Any]:
+    """
+    Perform One-Way ANOVA (Analysis of Variance) across multiple categories.
+
+    Args:
+        df: Input DataFrame
+        group_col: Categorical feature with 3+ groups (e.g. 'Category', 'Region')
+        val_col: Continuous variable (e.g. 'Sales', 'Profit Margin')
+
+    Returns:
+        Dictionary with F-statistic, p-value, group summaries, and conclusion
+    """
+    if df is None or df.empty:
+        return {'status': 'insufficient_data'}
+
+    groups = [group[val_col].dropna().values for _, group in df.groupby(group_col) if len(group[val_col].dropna()) >= 2]
+
+    if len(groups) < 2:
+        return {'status': 'insufficient_groups'}
+
+    f_stat, p_val = stats.f_oneway(*groups)
+
+    group_means = df.groupby(group_col)[val_col].agg(['count', 'mean', 'std']).round(2).to_dict('index')
+
+    return {
+        'status': 'success',
+        'feature': group_col,
+        'metric': val_col,
+        'f_statistic': round(float(f_stat), 4),
+        'p_value': round(float(p_val), 6),
+        'is_significant': bool(p_val < ANOVA_ALPHA),
+        'group_metrics': group_means,
+        'conclusion': (
+            f"Significant variance across groups ({group_col}) on {val_col} (F = {f_stat:.2f}, p = {p_val:.4f} < {ANOVA_ALPHA})"
+            if p_val < ANOVA_ALPHA
+            else f"Variance across groups ({group_col}) on {val_col} is not statistically significant (p = {p_val:.4f} >= {ANOVA_ALPHA})"
+        )
+    }
+
 def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Calculate high-level executive business KPIs.
