@@ -320,6 +320,44 @@ def perform_one_way_anova(
         )
     }
 
+def perform_chi_square_test(
+    df: pd.DataFrame,
+    cat_col1: str,
+    cat_col2: str
+) -> Dict[str, Any]:
+    """
+    Perform Pearson Chi-Square test of independence between two categorical features.
+
+    Args:
+        df: Input DataFrame
+        cat_col1: First categorical variable (e.g. 'Region')
+        cat_col2: Second categorical variable (e.g. 'Payment Mode')
+
+    Returns:
+        Dictionary with Chi2 statistic, p-value, degrees of freedom, and contingency table
+    """
+    if df is None or df.empty:
+        return {'status': 'insufficient_data'}
+
+    contingency = pd.crosstab(df[cat_col1], df[cat_col2])
+    chi2, p_val, dof, _ = stats.chi2_contingency(contingency)
+
+    return {
+        'status': 'success',
+        'variable_1': cat_col1,
+        'variable_2': cat_col2,
+        'chi2_statistic': round(float(chi2), 4),
+        'p_value': round(float(p_val), 6),
+        'dof': int(dof),
+        'is_significant': bool(p_val < 0.05),
+        'contingency_table': contingency.to_dict(),
+        'conclusion': (
+            f"Statistically significant association between {cat_col1} and {cat_col2} (chi2 = {chi2:.2f}, p = {p_val:.4f})"
+            if p_val < 0.05
+            else f"No significant relationship between {cat_col1} and {cat_col2} (p = {p_val:.4f})"
+        )
+    }
+
 def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Calculate high-level executive business KPIs.
