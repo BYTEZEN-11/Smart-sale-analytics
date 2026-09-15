@@ -358,6 +358,39 @@ def perform_chi_square_test(
         )
     }
 
+def calculate_cohort_retention(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Build customer acquisition cohorts and compute customer retention rates matrix over time.
+
+    Args:
+        df: Sales transactions DataFrame
+
+    Returns:
+        Tuple of (Customer Retention Count Matrix, Customer Retention Percentage Matrix)
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    df = df.copy()
+    if not pd.api.types.is_datetime64_any_dtype(df['Order Date']):
+        df['Order Date'] = pd.to_datetime(df['Order Date'], errors='coerce')
+
+    df = df.dropna(subset=['Order Date', 'Customer'])
+    df['OrderPeriod'] = df['Order Date'].dt.to_period('M')
+
+    df['CohortPeriod'] = df.groupby('Customer')['OrderPeriod'].transform('min')
+
+    cohort_data = df.groupby(['CohortPeriod', 'OrderPeriod']).agg(n_customers=('Customer', 'nunique')).reset_index()
+    cohort_data['PeriodIndex'] = (cohort_data['OrderPeriod'] - cohort_data['CohortPeriod']).apply(lambda x: x.n)
+
+    retention_counts = cohort_data.pivot(index='CohortPeriod', columns='PeriodIndex', values='n_customers')
+    cohort_sizes = retention_counts.iloc[:, 0]
+
+    retention_pct = retention_counts.divide(cohort_sizes, axis=0) * 100.0
+    retention_pct = retention_pct.round(1)
+
+    return retention_counts, retention_pct
+
 def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Calculate high-level executive business KPIs.
