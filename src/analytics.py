@@ -391,6 +391,37 @@ def calculate_cohort_retention(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataF
 
     return retention_counts, retention_pct
 
+def calculate_pareto_analysis(
+    df: pd.DataFrame,
+    dimension: str = 'Product',
+    metric: str = 'Sales'
+) -> pd.DataFrame:
+    """
+    Calculate Pareto 80/20 distribution: rank entities, cumulative contribution %, and 80% cutoff indicator.
+
+    Args:
+        df: Input DataFrame
+        dimension: Grouping attribute ('Product' or 'Customer')
+        metric: Metric to sum (default 'Sales')
+
+    Returns:
+        Ranked DataFrame with Cumulative Percentage and Pareto Segment ('Top 80% Vital' or 'Bottom 20%')
+    """
+    if df is None or df.empty or dimension not in df.columns or metric not in df.columns:
+        return pd.DataFrame()
+
+    grouped = df.groupby(dimension, as_index=False)[metric].sum().sort_values(metric, ascending=False).reset_index(drop=True)
+    total_val = grouped[metric].sum()
+
+    if total_val == 0:
+        return grouped
+
+    grouped['Cumulative_Sum'] = grouped[metric].cumsum()
+    grouped['Cumulative_Pct'] = (grouped['Cumulative_Sum'] / total_val * 100.0).round(2)
+    grouped['Pareto_Segment'] = np.where(grouped['Cumulative_Pct'] <= (PARETO_RATIO * 100), 'Top 80% (Vital Few)', 'Bottom 20% (Trivial Many)')
+
+    return grouped
+
 def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Calculate high-level executive business KPIs.
