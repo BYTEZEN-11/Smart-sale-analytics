@@ -252,3 +252,227 @@ def render_top_products(df: pd.DataFrame, top_n: int = 10) -> None:
         logger.error(f"Error rendering top products: {e}")
         st.error("Unable to render top products chart.")
 
+def render_forecast_chart(forecast_df: pd.DataFrame) -> None:
+    """
+    Render time-series sales forecast with shaded 95% confidence interval ribbons.
+
+    Args:
+        forecast_df: DataFrame with Historical & Forecast periods and Lower_CI / Upper_CI
+    """
+    if forecast_df.empty:
+        st.info("No forecast data available.")
+        return
+
+    try:
+        hist_df = forecast_df[forecast_df['Type'] == 'Historical']
+        fc_df = forecast_df[forecast_df['Type'] == 'Forecast']
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            x=hist_df['Year-Month'],
+            y=hist_df['Sales'],
+            name='Historical Sales',
+            mode='lines+markers',
+            line=dict(color='#2563eb', width=3),
+            marker=dict(size=6),
+            hovertemplate='<b>Historical</b><br>%{x}: $%{y:,.0f}<extra></extra>'
+        ))
+
+        if not fc_df.empty:
+            bridge_x = [hist_df['Year-Month'].iloc[-1]] + list(fc_df['Year-Month'])
+            bridge_y = [hist_df['Sales'].iloc[-1]] + list(fc_df['Sales'])
+            bridge_upper = [hist_df['Sales'].iloc[-1]] + list(fc_df['Upper_CI'])
+            bridge_lower = [hist_df['Sales'].iloc[-1]] + list(fc_df['Lower_CI'])
+
+            fig.add_trace(go.Scatter(
+                x=bridge_x,
+                y=bridge_upper,
+                name='Upper 95% Confidence Band',
+                mode='lines',
+                line=dict(color='rgba(139, 92, 246, 0.0)'),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=bridge_x,
+                y=bridge_lower,
+                name='95% Confidence Interval',
+                mode='lines',
+                line=dict(color='rgba(139, 92, 246, 0.0)'),
+                fill='tonexty',
+                fillcolor='rgba(139, 92, 246, 0.20)',
+                hovertemplate='<b>Confidence Interval</b><br>Range: $%{y:,.0f}<extra></extra>'
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=bridge_x,
+                y=bridge_y,
+                name='6-Month Forecast Projection',
+                mode='lines+markers',
+                line=dict(color='#8b5cf6', width=3, dash='dash'),
+                marker=dict(size=7, symbol='diamond'),
+                hovertemplate='<b>Projected Sales</b><br>%{x}: $%{y:,.0f}<extra></extra>'
+            ))
+
+        fig.update_layout(
+            title={'text': '🔮 6-Month Predictive Sales Forecast with 95% Confidence Intervals', 'font': {'size': 18, 'color': '#1e3a8a'}},
+            height=460,
+            xaxis=dict(title='Year-Month', showgrid=True, gridcolor='rgba(0,0,0,0.06)'),
+            yaxis=dict(title='Projected Sales ($)', showgrid=True, gridcolor='rgba(0,0,0,0.06)'),
+            template='plotly_white',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        logger.error(f"Error rendering forecast chart: {e}")
+        st.error("Unable to render forecast chart.")
+
+def render_pareto_chart(pareto_df: pd.DataFrame, dimension_name: str = 'Product') -> None:
+    """
+    Render dual-axis Pareto 80/20 chart (Individual Bars + Cumulative % Line + 80% Threshold).
+
+    Args:
+        pareto_df: DataFrame output from calculate_pareto_analysis
+        dimension_name: Label for entity dimension
+    """
+    if pareto_df.empty:
+        st.info("No data available for Pareto analysis.")
+        return
+
+    try:
+        plot_df = pareto_df.head(25)
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=plot_df[dimension_name],
+            y=plot_df['Sales'],
+            name='Revenue ($)',
+            marker=dict(color='#3b82f6', line=dict(color='white', width=1)),
+            yaxis='y',
+            hovertemplate='<b>%{x}</b><br>Sales: $%{y:,.0f}<extra></extra>'
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=plot_df[dimension_name],
+            y=plot_df['Cumulative_Pct'],
+            name='Cumulative Revenue %',
+            mode='lines+markers',
+            line=dict(color='#ef4444', width=3),
+            marker=dict(size=6),
+            yaxis='y2',
+            hovertemplate='<b>Cumulative</b>: %{y:.1f}%<extra></extra>'
+        ))
+
+        fig.add_hline(
+            y=80,
+            line_dash='dash',
+            line_color='#b91c1c',
+            annotation_text='80% Revenue Cutoff (Pareto Threshold)',
+            annotation_position='top left',
+            yref='y2'
+        )
+
+        fig.update_layout(
+            title={'text': f'🎯 Pareto (80/20) Revenue Concentration: {dimension_name}', 'font': {'size': 18, 'color': '#1e3a8a'}},
+            height=460,
+            template='plotly_white',
+            xaxis=dict(title=dimension_name, tickangle=-45),
+            yaxis=dict(title='Individual Sales ($)', showgrid=True, gridcolor='rgba(0,0,0,0.06)'),
+            yaxis2=dict(
+                title='Cumulative Contribution (%)',
+                overlaying='y',
+                side='right',
+                range=[0, 105],
+                showgrid=False
+            ),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        logger.error(f"Error rendering Pareto chart: {e}")
+        st.error("Unable to render Pareto chart.")
+
+def render_cohort_heatmap(retention_pct: pd.DataFrame) -> None:
+    """
+    Render customer cohort retention percentage heatmap.
+
+    Args:
+        retention_pct: Matrix of customer retention percentages
+    """
+    if retention_pct.empty:
+        st.info("Insufficient longitudinal data for customer cohort matrix.")
+        return
+
+    try:
+        heat_df = retention_pct.copy()
+        heat_df.index = [str(idx) for idx in heat_df.index]
+
+        fig = px.imshow(
+            heat_df,
+            labels=dict(x="Months After Acquisition", y="Cohort Month", color="Retention %"),
+            x=[f"Month {c}" for c in heat_df.columns],
+            y=heat_df.index,
+            text_auto='.0f',
+            aspect="auto",
+            color_continuous_scale="Viridis",
+            zmin=0,
+            zmax=100
+        )
+        fig.update_layout(
+            title={'text': '👥 Customer Cohort Retention Rates (%)', 'font': {'size': 18, 'color': '#1e3a8a'}},
+            height=440,
+            template='plotly_white'
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        logger.error(f"Error rendering cohort heatmap: {e}")
+        st.error("Unable to render cohort retention heatmap.")
+
+def render_rfm_scatter(rfm: pd.DataFrame) -> None:
+    """
+    Render interactive RFM customer value scatter plot.
+
+    Args:
+        rfm: Output DataFrame from rfm_segmentation
+    """
+    if rfm.empty:
+        st.info("No RFM data available.")
+        return
+
+    try:
+        fig = px.scatter(
+            rfm,
+            x='Frequency',
+            y='Monetary',
+            size='Recency',
+            color='Customer Segment',
+            hover_name='Customer',
+            hover_data=['R_Score', 'F_Score', 'M_Score', 'AOV'],
+            title='🎯 Customer Value Map (Frequency vs. Monetary Value)',
+            size_max=18,
+            color_discrete_map={
+                'Champions': '#10b981',
+                'Loyal Customers': '#3b82f6',
+                'Potential Loyalists': '#f59e0b',
+                'At Risk': '#f97316',
+                'Lost Customers': '#ef4444'
+            }
+        )
+        fig.update_layout(
+            template='plotly_white',
+            height=460,
+            xaxis=dict(title='Purchase Frequency (Orders)', showgrid=True),
+            yaxis=dict(title='Monetary Spend ($)', showgrid=True)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        logger.error(f"Error rendering RFM scatter: {e}")
+        st.error("Unable to render customer value map.")
+
