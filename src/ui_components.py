@@ -152,3 +152,103 @@ def render_category_pie(df: pd.DataFrame) -> None:
         logger.error(f"Error rendering category donut chart: {e}")
         st.error("Unable to render category chart.")
 
+def render_regional_bar(df: pd.DataFrame) -> None:
+    """
+    Render regional performance comparison bar chart.
+
+    Args:
+        df: Filtered sales DataFrame
+    """
+    if df.empty:
+        st.info("No regional data available.")
+        return
+
+    try:
+        reg_df = df.groupby('Region', as_index=False).agg(
+            Sales=('Sales', 'sum'),
+            Profit=('Profit', 'sum')
+        ).sort_values('Sales', ascending=False)
+
+        fig = go.Figure(data=[
+            go.Bar(
+                name='Sales',
+                x=reg_df['Region'],
+                y=reg_df['Sales'],
+                text=reg_df['Sales'],
+                texttemplate='$%{text:,.0f}',
+                textposition='outside',
+                marker=dict(color='#3b82f6', line=dict(color='white', width=1.5)),
+                hovertemplate='<b>%{x} Sales</b>: $%{y:,.0f}<extra></extra>'
+            ),
+            go.Bar(
+                name='Profit',
+                x=reg_df['Region'],
+                y=reg_df['Profit'],
+                text=reg_df['Profit'],
+                texttemplate='$%{text:,.0f}',
+                textposition='outside',
+                marker=dict(color='#10b981', line=dict(color='white', width=1.5)),
+                hovertemplate='<b>%{x} Profit</b>: $%{y:,.0f}<extra></extra>'
+            )
+        ])
+
+        fig.update_layout(
+            title={'text': '🌎 Regional Revenue vs Profit', 'font': {'size': 18, 'color': '#1e3a8a'}},
+            barmode='group',
+            height=420,
+            xaxis=dict(title='Region', showgrid=False),
+            yaxis=dict(title='Amount ($)', showgrid=True, gridcolor='rgba(0,0,0,0.06)'),
+            template='plotly_white',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        logger.error(f"Error rendering regional bar: {e}")
+        st.error("Unable to render regional chart.")
+
+def render_top_products(df: pd.DataFrame, top_n: int = 10) -> None:
+    """
+    Render top N products horizontal bar chart.
+
+    Args:
+        df: Sales DataFrame
+        top_n: Number of top products
+    """
+    if df.empty:
+        st.info("No product data available.")
+        return
+
+    try:
+        prod_df = df.groupby('Product', as_index=False)['Sales'].sum().nlargest(top_n, 'Sales').sort_values('Sales')
+
+        fig = go.Figure(data=[go.Bar(
+            y=prod_df['Product'],
+            x=prod_df['Sales'],
+            orientation='h',
+            text=prod_df['Sales'],
+            texttemplate='$%{text:,.0f}',
+            textposition='outside',
+            marker=dict(
+                color=prod_df['Sales'],
+                colorscale='Blues',
+                showscale=False,
+                line=dict(color='white', width=1)
+            ),
+            hovertemplate='<b>%{y}</b><br>Sales: $%{x:,.0f}<extra></extra>'
+        )])
+
+        fig.update_layout(
+            title={'text': f'🏆 Top {top_n} Products by Revenue', 'font': {'size': 18, 'color': '#1e3a8a'}},
+            height=420,
+            xaxis=dict(title='Revenue ($)', showgrid=True, gridcolor='rgba(0,0,0,0.06)'),
+            yaxis=dict(title='', showgrid=False),
+            template='plotly_white',
+            margin=dict(l=160)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        logger.error(f"Error rendering top products: {e}")
+        st.error("Unable to render top products chart.")
+
