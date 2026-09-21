@@ -476,3 +476,72 @@ def render_rfm_scatter(rfm: pd.DataFrame) -> None:
         logger.error(f"Error rendering RFM scatter: {e}")
         st.error("Unable to render customer value map.")
 
+def render_filters(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Render enhanced sidebar filters with date presets and multi-select dimensions.
+
+    Args:
+        df: Input DataFrame
+
+    Returns:
+        Dictionary of user-selected filters
+    """
+    st.sidebar.title('📊 SmartSales Analytics')
+
+    if df.empty or 'Order Date' not in df.columns:
+        return {}
+
+    min_date = df['Order Date'].min().date()
+    max_date = df['Order Date'].max().date()
+
+    st.sidebar.markdown('### 📅 Time Horizon')
+
+    date_selection = st.sidebar.date_input(
+        'Custom Date Range',
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date
+    )
+
+    if isinstance(date_selection, tuple) and len(date_selection) == 2:
+        start_date, end_date = date_selection
+    else:
+        start_date, end_date = min_date, max_date
+
+    st.sidebar.markdown('### 🔍 Dimensional Slicers')
+    filter_keys = ['Region', 'Category', 'Customer Segment', 'Payment Mode', 'Shipping Mode']
+    selected_filters = {'date_range': (start_date, end_date)}
+
+    for key in filter_keys:
+        if key in df.columns:
+            options = sorted([str(x) for x in df[key].dropna().unique()])
+            selected_filters[key] = st.sidebar.multiselect(key, options=options, default=[])
+
+    return selected_filters
+
+def apply_filters(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Apply active sidebar filter conditions to DataFrame.
+
+    Args:
+        df: Input DataFrame
+        filters: Filter criteria dictionary
+
+    Returns:
+        Filtered DataFrame
+    """
+    if df.empty or not filters:
+        return df
+
+    filtered = df.copy()
+
+    if 'date_range' in filters and 'Order Date' in filtered.columns:
+        start, end = filters['date_range']
+        filtered = filtered[(filtered['Order Date'].dt.date >= start) & (filtered['Order Date'].dt.date <= end)]
+
+    for col, values in filters.items():
+        if col != 'date_range' and values and col in filtered.columns:
+            filtered = filtered[filtered[col].astype(str).isin(values)]
+
+    return filtered
+
