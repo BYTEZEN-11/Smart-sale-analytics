@@ -545,3 +545,142 @@ def apply_filters(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
 
     return filtered
 
+def export_dataframe_to_excel(df: pd.DataFrame, report_title: str = "SmartSales Report") -> bytes:
+    """
+    Generate a formatted multi-sheet Excel spreadsheet buffer.
+
+    Args:
+        df: Data to export
+        report_title: Worksheet name
+
+    Returns:
+        Raw bytes of Excel (.xlsx) file
+    """
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Sales Data', index=False)
+
+        summary_records = [
+            {'Metric': 'Total Orders', 'Value': int(df['Order ID'].nunique()) if 'Order ID' in df.columns else len(df)},
+            {'Metric': 'Total Revenue ($)', 'Value': round(float(df['Sales'].sum()), 2) if 'Sales' in df.columns else 0.0},
+            {'Metric': 'Total Profit ($)', 'Value': round(float(df['Profit'].sum()), 2) if 'Profit' in df.columns else 0.0},
+            {'Metric': 'Unique Customers', 'Value': int(df['Customer'].nunique()) if 'Customer' in df.columns else 0}
+        ]
+        pd.DataFrame(summary_records).to_excel(writer, sheet_name='Executive Summary', index=False)
+
+    return output.getvalue()
+
+def render_data_table(
+    df: pd.DataFrame,
+    search_term: Optional[str] = None,
+    max_rows: int = 10000
+) -> None:
+    """
+    Render searchable data table with CSV and Excel export options.
+
+    Args:
+        df: Filtered DataFrame
+        search_term: Keyword to search
+        max_rows: Maximum rows displayed for browser performance
+    """
+    if df.empty:
+        st.warning("No records match your selected filter criteria.")
+        return
+
+    display_df = df.copy()
+
+    if search_term and search_term.strip():
+        term = search_term.strip().lower()
+        searchable_cols = [c for c in ['Customer', 'Product', 'Order ID', 'Category', 'City', 'State'] if c in display_df.columns]
+        mask = np.zeros(len(display_df), dtype=bool)
+        for c in searchable_cols:
+            mask |= display_df[c].astype(str).str.lower().str.contains(term, na=False)
+        display_df = display_df[mask]
+
+    if display_df.empty:
+        st.warning(f"No records matching search term: '{search_term}'")
+        return
+
+    total_matches = len(display_df)
+    if total_matches > max_rows:
+        st.info(f"Displaying top {max_rows:,} records out of {total_matches:,} matches.")
+        display_df = display_df.head(max_rows)
+
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    col_csv, col_xlsx = st.columns(2)
+    with col_csv:
+        csv_bytes = display_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download CSV Dataset",
+            data=csv_bytes,
+            file_name="smartsales_filtered.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    with col_xlsx:
+        excel_bytes = export_dataframe_to_excel(display_df)
+        st.download_button(
+            label="📊 Download Formatted Excel (.xlsx)",
+            data=excel_bytes,
+            file_name="smartsales_analytics_report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+def render_insights(df: pd.DataFrame) -> List[str]:
+    """
+    Generate automated strategic business insights based on current data slice.
+
+    Args:
+        df: Sales DataFrame
+
+    Returns:
+        List of HTML-formatted insight strings
+    """
+    if df.empty:
+        return ['<div class="insight-box">⚠️ No transaction records for the active slice.</div>']
+
+    insights = []
+    try:
+        total_sales = df['Sales'].sum()
+        total_profit = df['Profit'].sum()
+
+        cat_group = df.groupby('Category')['Sales'].sum().sort_values(ascending=False)
+        if not cat_group.empty and total_sales > 0:
+            top_cat = cat_group.index[0]
+            cat_pct = (cat_group.iloc[0] / total_sales) * 100
+            insights.append(
+                f'<div class="insight-box">🎯 <b>{top_cat}</b> is the primary revenue engine, accounting for '
+                f'<b>{cat_pct:.1f}%</b> of total filtered sales.</div>'
+            )
+
+        reg_group = df.groupby('Region')['Sales'].sum().sort_values(ascending=False)
+        if not reg_group.empty:
+            top_reg = reg_group.index[0]
+            insights.append(
+                f'<div class="insight-box">🌎 <b>{top_reg}</b> leads regional territory performance at '
+                f'<b>${reg_group.iloc[0]:,.0f}</b>.</div>'
+            )
+
+        margin = (total_profit / total_sales * 100) if total_sales > 0 else 0
+        badge_cls = 'badge-success' if margin >= 20 else 'badge-warning' if margin >= 10 else 'badge-danger'
+        insights.append(
+            f'<div class="insight-box">📊 Aggregate Portfolio Margin: '
+            f'<span class="badge {badge_cls}">{margin:.1f}%</span> '
+            f'({"Strong profitability" if margin >= 20 else "Requires margin improvement"})</div>'
+        )
+
+        high_disc = df[df['Discount'] > 0.25]
+        if len(high_disc) > 0:
+            disc_loss = high_disc[high_disc['Profit'] < 0]
+            insights.append(
+                f'<div class="insight-box">⚠️ <b>{len(high_disc):,} orders</b> had discounts > 25%, with '
+                f'<b>{len(disc_loss):,}</b> operating at a net financial loss.</div>'
+            )
+
+    except Exception as e:
+        logger.error(f"Error computing insights: {e}")
+        insights.append('<div class="insight-box">❌ Unable to synthesize insights.</div>')
+
+    return insights
